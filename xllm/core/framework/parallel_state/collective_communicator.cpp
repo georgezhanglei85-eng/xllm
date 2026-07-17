@@ -16,6 +16,7 @@ limitations under the License.
 #include "collective_communicator.h"
 
 #include "mapping_npu.h"
+#include "mega_moe_context.h"
 
 #if defined(USE_NPU)
 #include "npu_process_group.h"
@@ -451,6 +452,17 @@ void CollectiveCommunicator::create_process_groups(
     parallel_args_->dispatchAndCombinecommDomain(
         dispatch_and_combine_comm.domain);
     parallel_args_->dispatchAndCombineHcclComm(dispatch_and_combine_comm.comm);
+  }
+#endif
+
+#if defined(USE_NPU)
+  if (::xllm::KernelConfig::get_instance().npu_kernel_backend() == "TORCH" &&
+      ep_size > 1 && moe_ep_group_ != nullptr) {
+    std::string moe_ep_group_name = moe_ep_group_->hccl_comm_name(true);
+    auto mega_moe_ctx = create_mega_moe_context(moe_ep_group_name, ep_size);
+    parallel_args_->mega_moe_context(mega_moe_ctx.context_tensor);
+    parallel_args_->mega_moe_ccl_buffer_size(
+        mega_moe_ctx.ccl_buffer_size);
   }
 #endif
 }

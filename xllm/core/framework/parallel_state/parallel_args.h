@@ -200,6 +200,10 @@ struct ParallelArgs {
 
   // atb hccl dispatchAndCombineHcclComm
   PROPERTY(HcclComm, dispatchAndCombineHcclComm);
+
+  // mega_moe KFC context tensor and ccl buffer size
+  PROPERTY(torch::Tensor, mega_moe_context);
+  PROPERTY(int64_t, mega_moe_ccl_buffer_size) = 0;
 #endif
 
   // the following pointers are unique pointers from CollectiveCommunicator

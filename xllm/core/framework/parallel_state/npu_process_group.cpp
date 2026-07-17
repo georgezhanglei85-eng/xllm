@@ -97,6 +97,9 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
   c10::intrusive_ptr<c10d_npu::ProcessGroupHCCL::Options> hccl_pg_options =
       c10d_npu::ProcessGroupHCCL::Options::create();
   hccl_pg_options->group_id = group_name;
+  if (group_name == "moe_ep_group") {
+    hccl_pg_options->hccl_config["hcclOpExpansionMode"] = static_cast<int32_t>(3);
+  }
 
   int32_t rank = global_rank;
   if (world_size != rank_size) {
