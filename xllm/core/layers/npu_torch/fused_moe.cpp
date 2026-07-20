@@ -1262,6 +1262,17 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
       torch::TensorOptions().dtype(torch::kInt32).device(
           hidden_states.device()));
 
+  LOG(INFO) << "mega_moe: calling aclnnMegaMoe with "
+            << "num_tokens=" << num_tokens
+            << " hidden=" << h
+            << " topk=" << topk_
+            << " num_experts=" << num_total_experts_
+            << " ep_world_size=" << ep_world_size
+            << " local_experts=" << num_experts_per_rank_
+            << " ccl_buf=" << ccl_buffer_size
+            << " w13_shape=" << w13_.sizes()
+            << " w2_shape=" << w2_.sizes();
+
   // Build empty tensor lists for optional scale/bias args.
   std::vector<at::Tensor> empty_vec;
   at::TensorList w1_tl(w1_list);
@@ -1290,6 +1301,8 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
       activation_ptr,
       activation_clamp_value,
       y, expert_token_nums);
+
+  LOG(INFO) << "mega_moe: aclnnMegaMoe completed successfully";
 
   // Step 6: Add shared expert output.
   if (shared_output.has_value()) {
