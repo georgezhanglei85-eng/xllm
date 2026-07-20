@@ -1270,6 +1270,8 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   std::string comm_alg_str("");
   std::string activation_str("swiglu");
   float activation_clamp_value = std::numeric_limits<float>::max();
+  const int64_t dispatch_quant_mode = 0;
+  const int64_t combine_quant_mode = 0;
 
   EXEC_NPU_CMD(aclnnMegaMoe,
       context, hidden_states_2d, topk_ids, topk_weights,
@@ -1278,9 +1280,9 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
       x_active_mask,
       num_total_experts_, ep_world_size, ccl_buffer_size,
       max_recv_token_num,
-      int64_t(0),  // dispatch_quant_mode
+      dispatch_quant_mode,
       dispatch_quant_result_type,
-      int64_t(0),  // combine_quant_mode
+      combine_quant_mode,
       const_cast<char*>(comm_alg_str.c_str()),
       num_max_tokens_per_rank,
       const_cast<char*>(activation_str.c_str()),
