@@ -1220,13 +1220,33 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   empty_cache_for_tensor(w2_);
 
   // Step 3: Split 3D weights into per-expert 2D tensors.
+  // mega_moe requires intermediate_hidden >= 1024. If the model's
+  // moe_intermediate_size is smaller, pad weights with zeros.
+  constexpr int64_t kMinMegaMoeIntermediate = 1024;
+  const int64_t target_intermediate =
+      std::max(local_intermediate_size_, kMinMegaMoeIntermediate);
+  const int64_t pad_amount =
+      target_intermediate - local_intermediate_size_;
   std::vector<torch::Tensor> w1_list;
   std::vector<torch::Tensor> w2_list;
   w1_list.reserve(num_experts_per_rank_);
   w2_list.reserve(num_experts_per_rank_);
   for (int64_t i = 0; i < num_experts_per_rank_; ++i) {
-    w1_list.push_back(w13_[i].contiguous());
-    w2_list.push_back(w2_[i].contiguous());
+    if (pad_amount > 0) {
+      // w13_[i] is [hidden, 2*intermediate]. Pad to [hidden, 2*target].
+      auto w1_pad = torch::zeros(
+          {hidden_size_, pad_amount * 2}, w13_.options());
+      w1_list.push_back(
+          torch::cat({w13_[i], w1_pad}, /*dim=*/1).contiguous());
+      // w2_[i] is [intermediate, hidden]. Pad to [target, hidden].
+      auto w2_pad = torch::zeros(
+          {pad_amount, hidden_size_}, w2_.options());
+      w2_list.push_back(
+          torch::cat({w2_[i], w2_pad}, /*dim=*/0).contiguous());
+    } else {
+      w1_list.push_back(w13_[i].contiguous());
+      w2_list.push_back(w2_[i].contiguous());
+    }
   }
 
   // Step 4: Create x_active_mask.
@@ -1265,8 +1285,12 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
             << " ep_world_size=" << ep_world_size
             << " local_experts=" << num_experts_per_rank_
             << " ccl_buf=" << ccl_buffer_size
-            << " w13_shape=" << w13_.sizes()
-            << " w2_shape=" << w2_.sizes();
+            << " target_intermediate=" << target_intermediate
+            << " pad_amount=" << pad_amount
+            << " w1[0]_shape=" << w1_list[0].sizes()
+            << " w2[0]_shape=" << w2_list[0].sizes()
+            << " ctx_defined=" << context.defined()
+            << " ctx_sizes=" << context.sizes();
 
   // Build TensorListWrapper for weight lists (needed by ACLNN_CMD).
   at::TensorList w1_ref(w1_list);
@@ -1283,20 +1307,6 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   float activation_clamp_value = std::numeric_limits<float>::max();
   int64_t dispatch_quant_mode_val = 0;
   int64_t combine_quant_mode_val = 0;
-
-  LOG(INFO) << "mega_moe: calling aclnnMegaMoe with "
-            << "num_tokens=" << num_tokens
-            << " hidden=" << h
-            << " topk=" << topk_
-            << " num_experts=" << num_total_experts_
-            << " ep_world_size=" << ep_world_size
-            << " local_experts=" << num_experts_per_rank_
-            << " ccl_buf=" << ccl_buffer_size
-            << " w13_shape=" << w13_.sizes()
-            << " w2_shape=" << w2_.sizes()
-            << " ctx_defined=" << context.defined()
-            << " ctx_dtype=" << context.dtype()
-            << " ctx_sizes=" << context.sizes();
 
   ACLNN_CMD(aclnnMegaMoe,
       context, hidden_states_2d, topk_ids, topk_weights,
