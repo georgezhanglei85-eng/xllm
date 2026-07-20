@@ -1263,15 +1263,18 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
           hidden_states.device()));
 
   // Build empty tensor lists for optional scale/bias args.
-  at::TensorList empty_list;
+  std::vector<at::Tensor> empty_vec;
+  at::TensorList w1_tl(w1_list);
+  at::TensorList w2_tl(w2_list);
+  at::TensorList empty_tl(empty_vec);
   std::string comm_alg_str("");
   std::string activation_str("swiglu");
   float activation_clamp_value = std::numeric_limits<float>::max();
 
   EXEC_NPU_CMD(aclnnMegaMoe,
       context, hidden_states_2d, topk_ids, topk_weights,
-      at::TensorList(w1_list), at::TensorList(w2_list),
-      empty_list, empty_list, empty_list, empty_list,
+      w1_tl, w2_tl,
+      empty_tl, empty_tl, empty_tl, empty_tl,
       x_active_mask,
       num_total_experts_, ep_world_size, ccl_buffer_size,
       max_recv_token_num,
