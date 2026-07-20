@@ -1300,14 +1300,18 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   LOG(INFO) << "mega_moe: aclnnMegaMoeGetWorkspaceSize addr=" << aclnnMegaMoeWs_addr;
 
   // Test tensor list conversion.
-  aclTensorList* test_w1 = convert_type(w1_tl);
-  LOG(INFO) << "mega_moe: w1 aclTensorList=" << test_w1;
-  aclTensorList* test_w2 = convert_type(w2_tl);
-  LOG(INFO) << "mega_moe: w2 aclTensorList=" << test_w2;
+  LOG(INFO) << "mega_moe: testing convert_type on context...";
   aclTensor* test_ctx = convert_type(context);
   LOG(INFO) << "mega_moe: context aclTensor=" << test_ctx;
+  LOG(INFO) << "mega_moe: testing convert_type on x...";
   aclTensor* test_x = convert_type(hidden_states_2d);
   LOG(INFO) << "mega_moe: x aclTensor=" << test_x;
+  LOG(INFO) << "mega_moe: testing convert_type on w1_tl (size=" << w1_tl.size() << ")...";
+  aclTensorList* test_w1 = convert_type(w1_tl);
+  LOG(INFO) << "mega_moe: w1 aclTensorList=" << test_w1;
+  LOG(INFO) << "mega_moe: testing convert_type on w2_tl (size=" << w2_tl.size() << ")...";
+  aclTensorList* test_w2 = convert_type(w2_tl);
+  LOG(INFO) << "mega_moe: w2 aclTensorList=" << test_w2;
 
   // Build tensor lists.
   at::TensorList w1_tl(w1_list);
