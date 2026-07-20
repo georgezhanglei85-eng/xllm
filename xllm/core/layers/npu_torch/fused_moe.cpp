@@ -33,7 +33,6 @@ limitations under the License.
 #endif
 
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <c10/core/Stack.h>
 
 #include "framework/config/eplb_config.h"
 #include "framework/config/kernel_config.h"
