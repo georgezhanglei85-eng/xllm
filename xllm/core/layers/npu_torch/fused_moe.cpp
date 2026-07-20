@@ -1129,15 +1129,12 @@ torch::Tensor FusedMoEImpl::forward_expert(
 
 namespace {
 
-void ensure_mega_moe_weight_layout(torch::Tensor& weight, bool& prepared,
+void ensure_mega_moe_weight_layout(torch::Tensor& weight,
                                   int64_t input_dim, int64_t output_dim,
                                   const char* name) {
   CHECK(weight.defined()) << name << " must be defined.";
   CHECK_EQ(weight.dim(), 3)
       << name << " must be 3D [expert, *, *], got " << weight.sizes();
-  if (prepared) {
-    return;
-  }
   if (weight.size(1) == output_dim && weight.size(2) == input_dim) {
     weight.set_data(weight.transpose(1, 2));
   } else if (weight.size(1) == input_dim && weight.size(2) == output_dim) {
@@ -1148,7 +1145,6 @@ void ensure_mega_moe_weight_layout(torch::Tensor& weight, bool& prepared,
                << output_dim << "] or [expert, " << output_dim << ", "
                << input_dim << "].";
   }
-  prepared = true;
 }
 
 }  // namespace
@@ -1212,12 +1208,10 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
 
   // Step 2: Ensure weights are in [expert, input, output] layout.
   ensure_mega_moe_weight_layout(w13_,
-                                 mega_moe_weights_prepared_,
                                  hidden_size_,
                                  local_intermediate_size_ * 2,
                                  "w13");
   ensure_mega_moe_weight_layout(w2_,
-                                 mega_moe_weights_prepared_,
                                  local_intermediate_size_,
                                  hidden_size_,
                                  "w2");
