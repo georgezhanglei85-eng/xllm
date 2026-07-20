@@ -1291,6 +1291,14 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
             << " ctx_defined=" << context.defined()
             << " ctx_sizes=" << context.sizes();
 
+  // Check if aclCreateTensorList is available in global scope.
+  void* aclCreateTensorList_addr = dlsym(RTLD_DEFAULT, "aclCreateTensorList");
+  LOG(INFO) << "mega_moe: aclCreateTensorList addr=" << aclCreateTensorList_addr;
+  void* aclnnMegaMoe_addr = dlsym(RTLD_DEFAULT, "aclnnMegaMoe");
+  LOG(INFO) << "mega_moe: aclnnMegaMoe addr=" << aclnnMegaMoe_addr;
+  void* aclnnMegaMoeWs_addr = dlsym(RTLD_DEFAULT, "aclnnMegaMoeGetWorkspaceSize");
+  LOG(INFO) << "mega_moe: aclnnMegaMoeGetWorkspaceSize addr=" << aclnnMegaMoeWs_addr;
+
   // Build tensor lists.
   at::TensorList w1_tl(w1_list);
   at::TensorList w2_tl(w2_list);
