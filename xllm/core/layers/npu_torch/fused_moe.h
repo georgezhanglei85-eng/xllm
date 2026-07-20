@@ -48,6 +48,10 @@ class FusedMoEImpl : public torch::nn::Module {
       const torch::Tensor& hidden_states,
       const torch::Tensor& router_logits,
       const std::optional<torch::Tensor>& shared_output);
+  torch::Tensor forward_with_mega_moe(
+      const torch::Tensor& hidden_states,
+      const torch::Tensor& router_logits,
+      const std::optional<torch::Tensor>& shared_output);
   torch::Tensor forward_with_selected_experts(
       const torch::Tensor& hidden_states,
       const torch::Tensor& topk_weights,
@@ -169,6 +173,7 @@ class FusedMoEImpl : public torch::nn::Module {
   bool enable_ep2_dispatch_combine_ = false;
   bool dispatch_ffn_combine_prepared_ = false;
   bool dispatch_gmm_combine_decode_prepared_ = false;
+  bool mega_moe_weights_prepared_ = false;
   torch::Tensor dispatch_ffn_w13_scale_;
   torch::Tensor dispatch_ffn_w2_scale_;
   std::string moe_ep_group_name_;

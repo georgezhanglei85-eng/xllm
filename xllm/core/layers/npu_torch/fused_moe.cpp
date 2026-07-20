@@ -32,6 +32,9 @@ limitations under the License.
 #include <torch_npu/csrc/aten/NPUNativeFunctions.h>
 #endif
 
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/core/Stack.h>
+
 #include "framework/config/eplb_config.h"
 #include "framework/config/kernel_config.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -853,6 +856,12 @@ torch::Tensor FusedMoEImpl::forward_expert(
     const torch::Tensor& hidden_states,
     const torch::Tensor& router_logits,
     const std::optional<torch::Tensor>& shared_output) {
+  // Use mega_moe fused operator when enabled and EP > 1.
+  if (::xllm::KernelConfig::get_instance().enable_mega_moe() &&
+      parallel_args_.ep_size() > 1 &&
+      parallel_args_.mega_moe_context().defined()) {
+    return forward_with_mega_moe(hidden_states, router_logits, shared_output);
+  }
   // prepare the parameters for MoE computation
   torch::IntArrayRef hidden_states_shape = hidden_states.sizes();
   torch::ScalarType hidden_states_dtype = hidden_states.dtype().toScalarType();
@@ -1117,6 +1126,185 @@ torch::Tensor FusedMoEImpl::forward_expert(
     }
   }
   return final_hidden_states;
+}
+
+namespace {
+
+void ensure_mega_moe_weight_layout(torch::Tensor& weight, bool& prepared,
+                                  int64_t input_dim, int64_t output_dim,
+                                  const char* name) {
+  CHECK(weight.defined()) << name << " must be defined.";
+  CHECK_EQ(weight.dim(), 3)
+      << name << " must be 3D [expert, *, *], got " << weight.sizes();
+  if (prepared) {
+    return;
+  }
+  if (weight.size(1) == output_dim && weight.size(2) == input_dim) {
+    weight.set_data(weight.transpose(1, 2));
+  } else if (weight.size(1) == input_dim && weight.size(2) == output_dim) {
+    // Already in [expert, input, output] layout.
+  } else {
+    LOG(FATAL) << name << " shape " << weight.sizes()
+               << " cannot be interpreted as [expert, " << input_dim << ", "
+               << output_dim << "] or [expert, " << output_dim << ", "
+               << input_dim << "].";
+  }
+  prepared = true;
+}
+
+}  // namespace
+
+torch::Tensor FusedMoEImpl::forward_with_mega_moe(
+    const torch::Tensor& hidden_states,
+    const torch::Tensor& router_logits,
+    const std::optional<torch::Tensor>& shared_output) {
+  torch::IntArrayRef hidden_states_shape = hidden_states.sizes();
+  torch::Tensor hidden_states_2d =
+      hidden_states.reshape({-1, hidden_states.size(-1)});
+  torch::Tensor router_logits_2d =
+      router_logits.reshape({-1, router_logits.size(-1)});
+
+  // Step 1: Compute topk_ids and topk_weights (same routing logic as
+  // select_experts, but without EP masking or token expansion).
+  torch::Tensor topk_weights;
+  torch::Tensor topk_ids;
+  if (preselected_experts_.has_value()) {
+    const auto& selected = preselected_experts_.value();
+    topk_weights = selected.first.reshape({-1, topk_});
+    topk_ids = selected.second.reshape({-1, topk_}).to(torch::kInt32);
+    topk_weights = topk_weights.to(hidden_states_2d.dtype());
+  } else if (scoring_func_ == "softmax" &&
+             !e_score_correction_bias_.defined()) {
+    xllm::kernel::MoeFusedTopkParams params;
+    params.input = router_logits_2d;
+    params.topk = topk_;
+    params.normalize = static_cast<bool>(renormalize_);
+    params.scoring_func = scoring_func_;
+    std::tie(topk_weights, topk_ids) =
+        xllm::kernel::moe_active_topk(params);
+    topk_ids = topk_ids.to(torch::kInt32);
+  } else {
+    auto logits_f32 = router_logits_2d.to(torch::kFloat32);
+    torch::Tensor routing_scores;
+    if (scoring_func_ == "sigmoid") {
+      routing_scores = torch::sigmoid(logits_f32);
+    } else {
+      routing_scores = torch::softmax(logits_f32, /*dim=*/-1);
+    }
+    auto choice_scores = routing_scores;
+    if (e_score_correction_bias_.defined()) {
+      choice_scores = choice_scores + e_score_correction_bias_;
+    }
+    auto topk_result = torch::topk(choice_scores,
+                                    topk_,
+                                    /*dim=*/-1,
+                                    /*largest=*/true,
+                                    /*sorted=*/false);
+    topk_ids = std::get<1>(topk_result).to(torch::kInt32).contiguous();
+    topk_weights = routing_scores.gather(
+        /*dim=*/1, topk_ids.to(torch::kLong).contiguous());
+    if (renormalize_) {
+      topk_weights = topk_weights / (topk_weights.sum(-1, true) + 1e-6);
+    }
+    topk_weights = topk_weights.contiguous();
+  }
+  topk_weights = topk_weights.to(hidden_states_2d.dtype()).contiguous();
+  topk_ids = topk_ids.contiguous();
+
+  // Step 2: Ensure weights are in [expert, input, output] layout.
+  ensure_mega_moe_weight_layout(w13_,
+                                 mega_moe_weights_prepared_,
+                                 hidden_size_,
+                                 local_intermediate_size_ * 2,
+                                 "w13");
+  ensure_mega_moe_weight_layout(w2_,
+                                 mega_moe_weights_prepared_,
+                                 local_intermediate_size_,
+                                 hidden_size_,
+                                 "w2");
+  empty_cache_for_tensor(w13_);
+  empty_cache_for_tensor(w2_);
+
+  // Step 3: Split 3D weights into per-expert 2D tensors.
+  std::vector<torch::Tensor> w1_list;
+  std::vector<torch::Tensor> w2_list;
+  w1_list.reserve(num_experts_per_rank_);
+  w2_list.reserve(num_experts_per_rank_);
+  for (int64_t i = 0; i < num_experts_per_rank_; ++i) {
+    w1_list.push_back(w13_[i].contiguous());
+    w2_list.push_back(w2_[i].contiguous());
+  }
+
+  // Step 4: Create x_active_mask.
+  const int64_t num_tokens = hidden_states_2d.size(0);
+  torch::Tensor x_active_mask = torch::ones(
+      {num_tokens},
+      torch::TensorOptions().dtype(torch::kInt8).device(
+          hidden_states.device()));
+
+  // Step 5: Call mega_moe operator via PyTorch dispatcher.
+  auto op_handle = c10::Dispatcher::singleton().findSchema(
+      {"cann_ops_transformer::npu_mega_moe", ""});
+  CHECK(op_handle.has_value())
+      << "cann_ops_transformer::npu_mega_moe op not found. "
+      << "Ensure cann_ops_transformer is imported.";
+
+  auto context = parallel_args_.mega_moe_context();
+  const int64_t ep_world_size = parallel_args_.ep_size();
+  const int64_t ccl_buffer_size = parallel_args_.mega_moe_ccl_buffer_size();
+  const int64_t max_recv_token_num =
+      num_tokens * ep_world_size * topk_;
+  const int64_t num_max_tokens_per_rank = num_tokens;
+
+  c10::Stack stack;
+  stack.reserve(24);
+  // Positional args.
+  stack.push_back(c10::IValue(context));
+  stack.push_back(c10::IValue(hidden_states_2d));
+  stack.push_back(c10::IValue(topk_ids));
+  stack.push_back(c10::IValue(topk_weights));
+  stack.push_back(c10::IValue(c10::List<torch::Tensor>(w1_list)));
+  stack.push_back(c10::IValue(c10::List<torch::Tensor>(w2_list)));
+  stack.push_back(c10::IValue(num_total_experts_));
+  stack.push_back(c10::IValue(ep_world_size));
+  stack.push_back(c10::IValue(ccl_buffer_size));
+  // Keyword args (all have defaults in the schema).
+  stack.push_back(c10::IValue());  // weight_scales1 = None
+  stack.push_back(c10::IValue());  // weight_scales2 = None
+  stack.push_back(c10::IValue());  // bias1 = None
+  stack.push_back(c10::IValue());  // bias2 = None
+  stack.push_back(c10::IValue(x_active_mask));
+  stack.push_back(c10::IValue(max_recv_token_num));
+  stack.push_back(c10::IValue(int64_t(0)));  // dispatch_quant_mode
+  stack.push_back(c10::IValue(int64_t(0)));  // combine_quant_mode
+  stack.push_back(c10::IValue(std::string("")));  // comm_alg
+  stack.push_back(c10::IValue(num_max_tokens_per_rank));
+  stack.push_back(c10::IValue(std::string("swiglu")));  // activation
+  stack.push_back(c10::IValue());  // activation_clamp = None
+  stack.push_back(c10::IValue());  // dispatch_quant_out_dtype = None
+  stack.push_back(c10::IValue());  // weight1_type = None
+  stack.push_back(c10::IValue());  // weight2_type = None
+
+  op_handle->callBoxed(stack);
+  CHECK_EQ(stack.size(), 1)
+      << "npu_mega_moe should return exactly one value (a tuple).";
+  c10::IValue result = stack.back();
+
+  auto tuple = result.toTuple();
+  torch::Tensor y = tuple->elements()[0].toTensor();
+
+  // Step 6: Add shared expert output.
+  if (shared_output.has_value()) {
+    y = y + shared_output.value();
+  }
+
+  // TP allreduce if needed (mega_moe handles EP all-to-all internally).
+  if (tp_pg_->world_size() > 1) {
+    y = parallel_state::reduce(y, tp_pg_);
+  }
+
+  y = y.reshape(hidden_states_shape);
+  return y;
 }
 
 torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
