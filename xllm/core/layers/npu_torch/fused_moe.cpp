@@ -33,6 +33,7 @@ limitations under the License.
 #endif
 
 #include "core/kernels/npu/aclnn/pytorch_npu_helper.hpp"
+#include "aclnn_common.h"
 
 #include "framework/config/eplb_config.h"
 #include "framework/config/kernel_config.h"
@@ -1267,11 +1268,14 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
             << " w13_shape=" << w13_.sizes()
             << " w2_shape=" << w2_.sizes();
 
-  // Build tensor lists.
-  at::TensorList w1_tl(w1_list);
-  at::TensorList w2_tl(w2_list);
-  std::vector<at::Tensor> empty_vec;
-  at::TensorList empty_tl(empty_vec);
+  // Build TensorListWrapper for weight lists (needed by ACLNN_CMD).
+  at::TensorList w1_ref(w1_list);
+  at::TensorList w2_ref(w2_list);
+  aclDataType w1_dtype = ConvertToAclDataType(w1_list[0].scalar_type());
+  aclDataType w2_dtype = ConvertToAclDataType(w2_list[0].scalar_type());
+  TensorListWrapper w1_wrapper = {w1_ref, w1_dtype};
+  TensorListWrapper w2_wrapper = {w2_ref, w2_dtype};
+  TensorListWrapper empty_wrapper = {at::TensorList(), ACL_DT_UNDEFINED};
   std::string comm_alg_str("");
   std::string activation_str("swiglu");
   char* comm_alg_ptr = const_cast<char*>(comm_alg_str.c_str());
@@ -1292,20 +1296,12 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
             << " w2_shape=" << w2_.sizes()
             << " ctx_defined=" << context.defined()
             << " ctx_dtype=" << context.dtype()
-            << " ctx_sizes=" << context.sizes()
-            << " x_dtype=" << hidden_states_2d.dtype()
-            << " x_sizes=" << hidden_states_2d.sizes()
-            << " ids_dtype=" << topk_ids.dtype()
-            << " ids_sizes=" << topk_ids.sizes()
-            << " w_dtype=" << topk_weights.dtype()
-            << " w_sizes=" << topk_weights.sizes()
-            << " mask_dtype=" << x_active_mask.dtype()
-            << " mask_sizes=" << x_active_mask.sizes();
+            << " ctx_sizes=" << context.sizes();
 
-  EXEC_NPU_CMD(aclnnMegaMoe,
+  ACLNN_CMD(aclnnMegaMoe,
       context, hidden_states_2d, topk_ids, topk_weights,
-      w1_tl, w2_tl,
-      empty_tl, empty_tl, empty_tl, empty_tl,
+      w1_wrapper, w2_wrapper,
+      empty_wrapper, empty_wrapper, empty_wrapper, empty_wrapper,
       x_active_mask,
       num_total_experts_, ep_world_size, ccl_buffer_size,
       max_recv_token_num,
