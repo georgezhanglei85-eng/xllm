@@ -298,8 +298,14 @@ inline void* get_op_api_func_addr(const char* api_name) {
   if (op_api_handler == nullptr) {
     return nullptr;
   }
-  return get_op_api_func_addr_in_lib(
+  void* func_addr = get_op_api_func_addr_in_lib(
       op_api_handler, get_op_api_lib_name(), api_name);
+  if (func_addr == nullptr) {
+    // Fallback: search the global scope for symbols (e.g. aclCreateTensorList
+    // in libascendcl.so which is not a NEEDED dependency of libopapi.so).
+    func_addr = dlsym(RTLD_DEFAULT, api_name);
+  }
+  return func_addr;
 }
 
 template <typename Func>

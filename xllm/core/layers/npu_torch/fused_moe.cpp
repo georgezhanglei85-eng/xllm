@@ -33,7 +33,6 @@ limitations under the License.
 #endif
 
 #include "core/kernels/npu/aclnn/pytorch_npu_helper.hpp"
-#include "aclnn_common.h"
 
 #include "framework/config/eplb_config.h"
 #include "framework/config/kernel_config.h"
@@ -1292,14 +1291,11 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
             << " ctx_defined=" << context.defined()
             << " ctx_sizes=" << context.sizes();
 
-  // Build TensorListWrapper for weight lists (needed by ACLNN_CMD).
-  at::TensorList w1_ref(w1_list);
-  at::TensorList w2_ref(w2_list);
-  aclDataType w1_dtype = ConvertToAclDataType(w1_list[0].scalar_type());
-  aclDataType w2_dtype = ConvertToAclDataType(w2_list[0].scalar_type());
-  TensorListWrapper w1_wrapper = {w1_ref, w1_dtype};
-  TensorListWrapper w2_wrapper = {w2_ref, w2_dtype};
-  TensorListWrapper empty_wrapper = {at::TensorList(), ACL_DT_UNDEFINED};
+  // Build tensor lists.
+  at::TensorList w1_tl(w1_list);
+  at::TensorList w2_tl(w2_list);
+  std::vector<at::Tensor> empty_vec;
+  at::TensorList empty_tl(empty_vec);
   std::string comm_alg_str("");
   std::string activation_str("swiglu");
   char* comm_alg_ptr = const_cast<char*>(comm_alg_str.c_str());
@@ -1308,10 +1304,10 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   int64_t dispatch_quant_mode_val = 0;
   int64_t combine_quant_mode_val = 0;
 
-  ACLNN_CMD(aclnnMegaMoe,
+  EXEC_NPU_CMD(aclnnMegaMoe,
       context, hidden_states_2d, topk_ids, topk_weights,
-      w1_wrapper, w2_wrapper,
-      empty_wrapper, empty_wrapper, empty_wrapper, empty_wrapper,
+      w1_tl, w2_tl,
+      empty_tl, empty_tl, empty_tl, empty_tl,
       x_active_mask,
       num_total_experts_, ep_world_size, ccl_buffer_size,
       max_recv_token_num,
