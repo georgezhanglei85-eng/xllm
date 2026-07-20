@@ -32,7 +32,7 @@ limitations under the License.
 #include <torch_npu/csrc/aten/NPUNativeFunctions.h>
 #endif
 
-#include <ATen/core/dispatch/Dispatcher.h>
+#include "core/kernels/npu/aclnn/pytorch_npu_helper.hpp"
 
 #include "framework/config/eplb_config.h"
 #include "framework/config/kernel_config.h"
@@ -1241,56 +1241,48 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
       torch::TensorOptions().dtype(torch::kInt8).device(
           hidden_states.device()));
 
-  // Step 5: Call mega_moe operator via PyTorch dispatcher.
-  auto op_handle = c10::Dispatcher::singleton().findSchema(
-      {"cann_ops_transformer::npu_mega_moe", ""});
-  CHECK(op_handle.has_value())
-      << "cann_ops_transformer::npu_mega_moe op not found. "
-      << "Ensure cann_ops_transformer is imported.";
-
+  // Step 5: Call aclnnMegaMoe directly via EXEC_NPU_CMD.
   auto context = parallel_args_.mega_moe_context();
   const int64_t ep_world_size = parallel_args_.ep_size();
   const int64_t ccl_buffer_size = parallel_args_.mega_moe_ccl_buffer_size();
   const int64_t max_recv_token_num =
       num_tokens * ep_world_size * topk_;
   const int64_t num_max_tokens_per_rank = num_tokens;
+  const int64_t local_moe_expert_num =
+      num_total_experts_ / ep_world_size;
+  const int64_t dispatch_quant_result_type = 28;  // DT_BF16
 
-  c10::Stack stack;
-  stack.reserve(24);
-  // Positional args.
-  stack.push_back(c10::IValue(context));
-  stack.push_back(c10::IValue(hidden_states_2d));
-  stack.push_back(c10::IValue(topk_ids));
-  stack.push_back(c10::IValue(topk_weights));
-  stack.push_back(c10::IValue(c10::List<torch::Tensor>(w1_list)));
-  stack.push_back(c10::IValue(c10::List<torch::Tensor>(w2_list)));
-  stack.push_back(c10::IValue(num_total_experts_));
-  stack.push_back(c10::IValue(ep_world_size));
-  stack.push_back(c10::IValue(ccl_buffer_size));
-  // Keyword args (all have defaults in the schema).
-  stack.push_back(c10::IValue());  // weight_scales1 = None
-  stack.push_back(c10::IValue());  // weight_scales2 = None
-  stack.push_back(c10::IValue());  // bias1 = None
-  stack.push_back(c10::IValue());  // bias2 = None
-  stack.push_back(c10::IValue(x_active_mask));
-  stack.push_back(c10::IValue(max_recv_token_num));
-  stack.push_back(c10::IValue(int64_t(0)));  // dispatch_quant_mode
-  stack.push_back(c10::IValue(int64_t(0)));  // combine_quant_mode
-  stack.push_back(c10::IValue(std::string("")));  // comm_alg
-  stack.push_back(c10::IValue(num_max_tokens_per_rank));
-  stack.push_back(c10::IValue(std::string("swiglu")));  // activation
-  stack.push_back(c10::IValue());  // activation_clamp = None
-  stack.push_back(c10::IValue());  // dispatch_quant_out_dtype = None
-  stack.push_back(c10::IValue());  // weight1_type = None
-  stack.push_back(c10::IValue());  // weight2_type = None
+  // Create output tensors.
+  const int64_t bs = num_tokens;
+  const int64_t h = hidden_states_2d.size(1);
+  torch::Tensor y = torch::empty(
+      {bs, h}, topk_ids.options().dtype(hidden_states_2d.dtype()));
+  torch::Tensor expert_token_nums = torch::empty(
+      {local_moe_expert_num},
+      torch::TensorOptions().dtype(torch::kInt32).device(
+          hidden_states.device()));
 
-  op_handle->callBoxed(stack);
-  CHECK_EQ(stack.size(), 1)
-      << "npu_mega_moe should return exactly one value (a tuple).";
-  c10::IValue result = stack.back();
+  // Build empty tensor lists for optional scale/bias args.
+  at::TensorList empty_list;
+  std::string comm_alg_str("");
+  std::string activation_str("swiglu");
+  float activation_clamp_value = std::numeric_limits<float>::max();
 
-  auto tuple = result.toTuple();
-  torch::Tensor y = tuple->elements()[0].toTensor();
+  EXEC_NPU_CMD(aclnnMegaMoe,
+      context, hidden_states_2d, topk_ids, topk_weights,
+      at::TensorList(w1_list), at::TensorList(w2_list),
+      empty_list, empty_list, empty_list, empty_list,
+      x_active_mask,
+      num_total_experts_, ep_world_size, ccl_buffer_size,
+      max_recv_token_num,
+      int64_t(0),  // dispatch_quant_mode
+      dispatch_quant_result_type,
+      int64_t(0),  // combine_quant_mode
+      const_cast<char*>(comm_alg_str.c_str()),
+      num_max_tokens_per_rank,
+      const_cast<char*>(activation_str.c_str()),
+      activation_clamp_value,
+      y, expert_token_nums);
 
   // Step 6: Add shared expert output.
   if (shared_output.has_value()) {
