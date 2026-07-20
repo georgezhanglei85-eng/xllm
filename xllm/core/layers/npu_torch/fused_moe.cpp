@@ -1275,7 +1275,7 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
       ConvertToAclDataType(w1_list[0].scalar_type())};
   TensorListWrapper w2_wrapper = {weight2_ref,
       ConvertToAclDataType(w2_list[0].scalar_type())};
-  TensorListWrapper empty_wrapper;
+  TensorListWrapper empty_wrapper = {at::TensorList(), aclDataType::ACL_DT_UNDEFINED};
   std::string comm_alg_str("");
   std::string activation_str("swiglu");
   char* comm_alg_ptr = const_cast<char*>(comm_alg_str.c_str());
