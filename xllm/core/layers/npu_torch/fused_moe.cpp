@@ -1269,6 +1269,8 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   at::TensorList empty_tl(empty_vec);
   std::string comm_alg_str("");
   std::string activation_str("swiglu");
+  char* comm_alg_ptr = const_cast<char*>(comm_alg_str.c_str());
+  char* activation_ptr = const_cast<char*>(activation_str.c_str());
   float activation_clamp_value = std::numeric_limits<float>::max();
   int64_t dispatch_quant_mode_val = 0;
   int64_t combine_quant_mode_val = 0;
@@ -1283,9 +1285,9 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
       dispatch_quant_mode_val,
       dispatch_quant_result_type,
       combine_quant_mode_val,
-      const_cast<char*>(comm_alg_str.c_str()),
+      comm_alg_ptr,
       num_max_tokens_per_rank,
-      const_cast<char*>(activation_str.c_str()),
+      activation_ptr,
       activation_clamp_value,
       y, expert_token_nums);
 
