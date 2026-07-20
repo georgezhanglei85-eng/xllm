@@ -1299,6 +1299,19 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   void* aclnnMegaMoeWs_addr = dlsym(RTLD_DEFAULT, "aclnnMegaMoeGetWorkspaceSize");
   LOG(INFO) << "mega_moe: aclnnMegaMoeGetWorkspaceSize addr=" << aclnnMegaMoeWs_addr;
 
+  // Build tensor lists.
+  at::TensorList w1_tl(w1_list);
+  at::TensorList w2_tl(w2_list);
+  std::vector<at::Tensor> empty_vec;
+  at::TensorList empty_tl(empty_vec);
+  std::string comm_alg_str("");
+  std::string activation_str("swiglu");
+  char* comm_alg_ptr = const_cast<char*>(comm_alg_str.c_str());
+  char* activation_ptr = const_cast<char*>(activation_str.c_str());
+  float activation_clamp_value = std::numeric_limits<float>::max();
+  int64_t dispatch_quant_mode_val = 0;
+  int64_t combine_quant_mode_val = 0;
+
   // Test tensor list conversion.
   LOG(INFO) << "mega_moe: testing convert_type on context...";
   aclTensor* test_ctx = ::xllm::kernel::npu::aclnn::detail::convert_type(context);
@@ -1312,19 +1325,6 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   LOG(INFO) << "mega_moe: testing convert_type on w2_tl (size=" << w2_tl.size() << ")...";
   aclTensorList* test_w2 = ::xllm::kernel::npu::aclnn::detail::convert_type(w2_tl);
   LOG(INFO) << "mega_moe: w2 aclTensorList=" << test_w2;
-
-  // Build tensor lists.
-  at::TensorList w1_tl(w1_list);
-  at::TensorList w2_tl(w2_list);
-  std::vector<at::Tensor> empty_vec;
-  at::TensorList empty_tl(empty_vec);
-  std::string comm_alg_str("");
-  std::string activation_str("swiglu");
-  char* comm_alg_ptr = const_cast<char*>(comm_alg_str.c_str());
-  char* activation_ptr = const_cast<char*>(activation_str.c_str());
-  float activation_clamp_value = std::numeric_limits<float>::max();
-  int64_t dispatch_quant_mode_val = 0;
-  int64_t combine_quant_mode_val = 0;
 
   EXEC_NPU_CMD(aclnnMegaMoe,
       context, hidden_states_2d, topk_ids, topk_weights,
