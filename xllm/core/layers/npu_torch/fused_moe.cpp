@@ -1335,25 +1335,51 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   aclTensor* test_etn = ::xllm::kernel::npu::aclnn::detail::convert_type(expert_token_nums);
   LOG(INFO) << "mega_moe: expert_token_nums aclTensor=" << test_etn;
 
+  auto context_arg = context;
+  auto x_arg = hidden_states_2d;
+  auto topk_ids_arg = topk_ids;
+  auto topk_weights_arg = topk_weights;
+  auto w1_tl_arg = w1_tl;
+  auto w2_tl_arg = w2_tl;
+  auto empty_tl_arg = empty_tl;
+  auto x_active_mask_arg = x_active_mask_opt;
+  auto moe_expert_num_arg = num_total_experts_;
+  auto ep_world_size_arg = ep_world_size;
+  auto ccl_buffer_size_arg = ccl_buffer_size;
+  auto max_recv_token_num_arg = max_recv_token_num;
+  auto dispatch_quant_mode_arg = dispatch_quant_mode_val;
+  auto dispatch_quant_out_dtype_arg = dispatch_quant_result_type;
+  auto combine_quant_mode_arg = combine_quant_mode_val;
+  auto comm_alg_arg = comm_alg_ptr;
+  auto num_max_tokens_per_rank_arg = num_max_tokens_per_rank;
+  auto activation_arg = activation_ptr;
+  auto activation_clamp_arg = activation_clamp_value;
+  auto weight1_type_arg = weight1_type_val;
+  auto weight2_type_arg = weight2_type_val;
+  auto topo_type_arg = topo_type_val;
+  auto rank_num_per_server_arg = rank_num_per_server_val;
+  auto y_arg = y;
+  auto expert_token_nums_arg = expert_token_nums;
+
   EXEC_NPU_CMD(aclnnMegaMoe,
-      context, hidden_states_2d, topk_ids, topk_weights,
-      w1_tl, w2_tl,
-      empty_tl, empty_tl, empty_tl, empty_tl,
-      x_active_mask_opt,
-      num_total_experts_, ep_world_size, ccl_buffer_size,
-      max_recv_token_num,
-      dispatch_quant_mode_val,
-      dispatch_quant_result_type,
-      combine_quant_mode_val,
-      comm_alg_ptr,
-      num_max_tokens_per_rank,
-      activation_ptr,
-      activation_clamp_value,
-      weight1_type_val,
-      weight2_type_val,
-      topo_type_val,
-      rank_num_per_server_val,
-      y, expert_token_nums);
+      context_arg, x_arg, topk_ids_arg, topk_weights_arg,
+      w1_tl_arg, w2_tl_arg,
+      empty_tl_arg, empty_tl_arg, empty_tl_arg, empty_tl_arg,
+      x_active_mask_arg,
+      moe_expert_num_arg, ep_world_size_arg, ccl_buffer_size_arg,
+      max_recv_token_num_arg,
+      dispatch_quant_mode_arg,
+      dispatch_quant_out_dtype_arg,
+      combine_quant_mode_arg,
+      comm_alg_arg,
+      num_max_tokens_per_rank_arg,
+      activation_arg,
+      activation_clamp_arg,
+      weight1_type_arg,
+      weight2_type_arg,
+      topo_type_arg,
+      rank_num_per_server_arg,
+      y_arg, expert_token_nums_arg);
 
   LOG(INFO) << "mega_moe: aclnnMegaMoe completed successfully";
 
