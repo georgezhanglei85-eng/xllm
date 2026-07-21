@@ -1203,8 +1203,8 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
     }
     topk_weights = topk_weights.contiguous();
   }
-  topk_weights = topk_weights.to(hidden_states_2d.dtype()).contiguous();
-  topk_ids = topk_ids.contiguous();
+  topk_weights = topk_weights.to(torch::kFloat32).contiguous();
+  topk_ids = topk_ids.to(torch::kInt32).contiguous();
 
   // Step 2: Ensure weights are in [expert, input, output] layout.
   ensure_mega_moe_weight_layout(w13_,
@@ -1311,6 +1311,8 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   float activation_clamp_value = std::numeric_limits<float>::max();
   int64_t dispatch_quant_mode_val = 0;
   int64_t combine_quant_mode_val = 0;
+  int64_t topo_type_val = 0;
+  int64_t rank_num_per_server_val = 2;
 
   // Test tensor list conversion.
   LOG(INFO) << "mega_moe: testing convert_type on context...";
@@ -1340,6 +1342,8 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
       num_max_tokens_per_rank,
       activation_ptr,
       activation_clamp_value,
+      topo_type_val,
+      rank_num_per_server_val,
       y, expert_token_nums);
 
   LOG(INFO) << "mega_moe: aclnnMegaMoe completed successfully";
