@@ -1332,6 +1332,13 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   LOG(INFO) << "mega_moe: expert_token_nums device=" << expert_token_nums.device()
             << " ptr=" << expert_token_nums.data_ptr();
 
+  LOG(INFO) << "mega_moe: testing convert_type on y...";
+  aclTensor* test_y = ::xllm::kernel::npu::aclnn::detail::convert_type(y);
+  LOG(INFO) << "mega_moe: y aclTensor=" << test_y;
+  LOG(INFO) << "mega_moe: testing convert_type on expert_token_nums...";
+  aclTensor* test_etn = ::xllm::kernel::npu::aclnn::detail::convert_type(expert_token_nums);
+  LOG(INFO) << "mega_moe: expert_token_nums aclTensor=" << test_etn;
+
   EXEC_NPU_CMD(aclnnMegaMoe,
       context, hidden_states_2d, topk_ids, topk_weights,
       w1_tl, w2_tl,
