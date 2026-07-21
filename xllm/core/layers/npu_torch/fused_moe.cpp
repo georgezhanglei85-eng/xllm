@@ -1270,11 +1270,10 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   const int64_t bs = num_tokens;
   const int64_t h = hidden_states_2d.size(1);
   torch::Tensor y = torch::empty(
-      {bs, h}, topk_ids.options().dtype(hidden_states_2d.dtype()));
+      {bs, h}, hidden_states_2d.options());
   torch::Tensor expert_token_nums = torch::empty(
       {local_moe_expert_num},
-      torch::TensorOptions().dtype(torch::kInt32).device(
-          hidden_states.device()));
+      hidden_states_2d.options().dtype(torch::kInt32));
 
   LOG(INFO) << "mega_moe: calling aclnnMegaMoe with "
             << "num_tokens=" << num_tokens
