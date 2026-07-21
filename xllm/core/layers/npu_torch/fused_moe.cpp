@@ -1349,22 +1349,21 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
       num_max_tokens_per_rank,
       activation_ptr,
       activation_clamp_value,
-      weight1_type_val,
-      weight2_type_val,
+      // weight1_type_val,
+      // weight2_type_val,
       topo_type_val,
       rank_num_per_server_val,
       y, expert_token_nums);
 
   LOG(INFO) << "mega_moe: aclnnMegaMoe completed successfully";
 
-  // Step 6: Add shared expert output.
+  // Step 6: TP allreduce on shared expert output only (mega_moe handles EP internally).
   if (shared_output.has_value()) {
-    y = y + shared_output.value();
-  }
-
-  // TP allreduce if needed (mega_moe handles EP all-to-all internally).
-  if (tp_pg_->world_size() > 1) {
-    y = parallel_state::reduce(y, tp_pg_);
+    auto shared = shared_output.value();
+    if (tp_pg_->world_size() > 1) {
+      shared = parallel_state::reduce(shared, tp_pg_);
+    }
+    y = y + shared;
   }
 
   y = y.reshape(hidden_states_shape);
