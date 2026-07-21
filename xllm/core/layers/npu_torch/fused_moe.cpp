@@ -1269,11 +1269,9 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   // Create output tensors.
   const int64_t bs = num_tokens;
   const int64_t h = hidden_states_2d.size(1);
-  torch::Tensor y = torch::empty(
-      {bs, h}, hidden_states_2d.options());
-  torch::Tensor expert_token_nums = torch::empty(
-      {local_moe_expert_num},
-      hidden_states_2d.options().dtype(torch::kInt32));
+  torch::Tensor y = at::empty_like(hidden_states_2d);
+  torch::Tensor expert_token_nums = at::empty(
+      {local_moe_expert_num}, hidden_states_2d.options().dtype(at::kInt));
 
   LOG(INFO) << "mega_moe: calling aclnnMegaMoe with "
             << "num_tokens=" << num_tokens
@@ -1328,6 +1326,11 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   LOG(INFO) << "mega_moe: testing convert_type on w2_tl (size=" << w2_tl.size() << ")...";
   aclTensorList* test_w2 = ::xllm::kernel::npu::aclnn::detail::convert_type(w2_tl);
   LOG(INFO) << "mega_moe: w2 aclTensorList=" << test_w2;
+
+  LOG(INFO) << "mega_moe: y device=" << y.device() << " ptr=" << y.data_ptr()
+            << " defined=" << y.defined() << " sizes=" << y.sizes();
+  LOG(INFO) << "mega_moe: expert_token_nums device=" << expert_token_nums.device()
+            << " ptr=" << expert_token_nums.data_ptr();
 
   EXEC_NPU_CMD(aclnnMegaMoe,
       context, hidden_states_2d, topk_ids, topk_weights,
