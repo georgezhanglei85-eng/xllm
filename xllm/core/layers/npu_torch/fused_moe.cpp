@@ -1311,6 +1311,8 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   float activation_clamp_value = std::numeric_limits<float>::max();
   int64_t dispatch_quant_mode_val = 0;
   int64_t combine_quant_mode_val = 0;
+  int64_t weight1_type_val = 0;
+  int64_t weight2_type_val = 0;
   int64_t topo_type_val = 0;
   int64_t rank_num_per_server_val = 2;
 
@@ -1342,6 +1344,8 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
       num_max_tokens_per_rank,
       activation_ptr,
       activation_clamp_value,
+      weight1_type_val,
+      weight2_type_val,
       topo_type_val,
       rank_num_per_server_val,
       y, expert_token_nums);
