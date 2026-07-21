@@ -1248,12 +1248,8 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
     }
   }
 
-  // Step 4: Create x_active_mask.
+  // Step 4: x_active_mask is nullopt for A16W16 path (not needed).
   const int64_t num_tokens = hidden_states_2d.size(0);
-  torch::Tensor x_active_mask = torch::ones(
-      {num_tokens},
-      torch::TensorOptions().dtype(torch::kInt8).device(
-          hidden_states.device()));
 
   // Step 5: Call aclnnMegaMoe directly via EXEC_NPU_CMD.
   auto context = parallel_args_.mega_moe_context();
@@ -1299,8 +1295,8 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   // Build tensor lists.
   at::TensorList w1_tl(w1_list);
   at::TensorList w2_tl(w2_list);
-  std::vector<at::Tensor> empty_vec;
-  at::TensorList empty_tl(empty_vec);
+  c10::optional<at::TensorList> empty_tl = c10::nullopt;
+  c10::optional<at::Tensor> x_active_mask_opt = c10::nullopt;
   std::string comm_alg_str("");
   std::string activation_str("swiglu");
   char* comm_alg_ptr = const_cast<char*>(comm_alg_str.c_str());
@@ -1343,7 +1339,7 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
       context, hidden_states_2d, topk_ids, topk_weights,
       w1_tl, w2_tl,
       empty_tl, empty_tl, empty_tl, empty_tl,
-      x_active_mask,
+      x_active_mask_opt,
       num_total_experts_, ep_world_size, ccl_buffer_size,
       max_recv_token_num,
       dispatch_quant_mode_val,

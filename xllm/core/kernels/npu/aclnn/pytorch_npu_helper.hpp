@@ -535,6 +535,14 @@ inline aclTensor* convert_type(const c10::optional<at::Tensor>& opt_tensor) {
   return nullptr;
 }
 
+inline aclTensorList* convert_type(
+    const c10::optional<at::TensorList>& opt_tensor_list) {
+  if (opt_tensor_list.has_value() && !opt_tensor_list->empty()) {
+    return convert_type(opt_tensor_list.value());
+  }
+  return nullptr;
+}
+
 inline aclIntArray* convert_type(
     const c10::optional<at::IntArrayRef>& opt_array) {
   if (opt_array.has_value()) {
