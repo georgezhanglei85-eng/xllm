@@ -1295,8 +1295,8 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   // Build tensor lists.
   at::TensorList w1_tl(w1_list);
   at::TensorList w2_tl(w2_list);
-  c10::optional<at::TensorList> empty_tl = c10::nullopt;
-  c10::optional<at::Tensor> x_active_mask_opt = c10::nullopt;
+  aclTensorList* empty_tl = nullptr;
+  aclTensor* x_active_mask_null = nullptr;
   std::string comm_alg_str("");
   std::string activation_str("swiglu");
   char* comm_alg_ptr = const_cast<char*>(comm_alg_str.c_str());
@@ -1364,8 +1364,8 @@ torch::Tensor FusedMoEImpl::forward_with_mega_moe(
   EXEC_NPU_CMD(aclnnMegaMoe,
       context_arg, x_arg, topk_ids_arg, topk_weights_arg,
       w1_tl_arg, w2_tl_arg,
-      empty_tl_arg, empty_tl_arg, empty_tl_arg, empty_tl_arg,
-      x_active_mask_arg,
+      empty_tl, empty_tl, empty_tl, empty_tl,
+      x_active_mask_null,
       moe_expert_num_arg, ep_world_size_arg, ccl_buffer_size_arg,
       max_recv_token_num_arg,
       dispatch_quant_mode_arg,
