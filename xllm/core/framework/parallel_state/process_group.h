@@ -24,6 +24,7 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include <torch_npu/csrc/distributed/ProcessGroupHCCL.hpp>
+#include "framework/parallel_state/mega_moe_comm_resource.h"
 #endif
 
 namespace xllm {
@@ -115,6 +116,12 @@ class ProcessGroup {
 
   virtual std::string hccl_comm_name(bool init_comm = true);
 
+#if defined(USE_NPU)
+  virtual HcclComm hccl_comm();
+  std::shared_ptr<MegaMoeCommResource> acquire_mega_moe_comm_resource(
+      const MegaMoeCommSpec& spec);
+#endif
+
  private:
   // rank of current process.
   int32_t rank_ = 0;
@@ -137,6 +144,13 @@ class ProcessGroup {
   std::unique_ptr<c10d_npu::ProcessGroupHCCL> pg_{nullptr};
 #else
   std::unique_ptr<c10d::Backend> pg_{nullptr};
+#endif
+
+#if defined(USE_NPU)
+  // Must be declared after pg_ so that it is destroyed first (reverse
+  // declaration order), releasing the context tensor before the HCCL
+  // communicator is torn down.
+  MegaMoeCommResourceSlot mega_moe_comm_slot_;
 #endif
 };
 

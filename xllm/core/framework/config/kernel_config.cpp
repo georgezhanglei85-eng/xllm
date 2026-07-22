@@ -53,6 +53,10 @@ DEFINE_bool(enable_aclnn_matmul,
 DEFINE_bool(enable_aclnn_swiglu,
             false,
             "enable ACLNN SwiGLU backend for supported NPU ATB layers.");
+
+DEFINE_bool(enable_mega_moe,
+            false,
+            "enable mega_moe fused operator for MoE expert parallel.");
 #endif
 
 namespace xllm {
@@ -85,6 +89,7 @@ void KernelConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_split_rmsnorm_rope);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_aclnn_matmul);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_aclnn_swiglu);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_mega_moe);
 #endif
 }
 
@@ -98,6 +103,7 @@ void KernelConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_split_rmsnorm_rope);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_aclnn_matmul);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_aclnn_swiglu);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_mega_moe);
 #endif
 }
 
@@ -121,6 +127,8 @@ void KernelConfig::append_config_json(
       config_json, default_config, enable_aclnn_matmul);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_aclnn_swiglu);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_mega_moe);
 #endif
 }
 

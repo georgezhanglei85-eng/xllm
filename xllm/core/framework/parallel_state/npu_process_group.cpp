@@ -223,4 +223,8 @@ std::string ProcessGroupImpl::hccl_comm_name(bool init_comm) {
 #endif
 }
 
+HcclComm ProcessGroupImpl::hccl_comm() {
+  return comm_;
+}
+
 }  // namespace xllm

@@ -229,6 +229,19 @@ std::string ProcessGroup::hccl_comm_name(bool init_comm) {
   return "";
 }
 
+#if defined(USE_NPU)
+HcclComm ProcessGroup::hccl_comm() {
+  CHECK(false) << "hccl_comm is only supported on NPU HCCL process group.";
+  return nullptr;
+}
+
+std::shared_ptr<MegaMoeCommResource>
+ProcessGroup::acquire_mega_moe_comm_resource(
+    const MegaMoeCommSpec& spec) {
+  return mega_moe_comm_slot_.acquire(spec);
+}
+#endif
+
 std::unique_ptr<ProcessGroup> create_process_group(
     int32_t rank,
     int32_t world_size,
