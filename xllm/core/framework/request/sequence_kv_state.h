@@ -34,6 +34,13 @@ class KVCacheState {
   size_t kv_cache_tokens_num() const;
   void set_kv_cache_tokens_num(size_t num);
   void incr_kv_cache_tokens_num(size_t num);
+  // Advance kv_cache_tokens_num_ to `new_target` if it grows the counter. No-op
+  // when `new_target <= kv_cache_tokens_num_`. CHECK-fails when `new_target`
+  // exceeds current_max_tokens_capacity() -- callers must clamp before calling.
+  // CHECK-fails when the counter is already past capacity (drift detection).
+  // Used by the host-cache H2D restore path in HierarchyBlockManagerPool where
+  // the "up to" semantics naturally arise from mismatched host/device counters.
+  void incr_kv_cache_tokens_num_up_to(size_t new_target);
 
   // Blocks held under `type`; empty slice when the type is absent.
   Slice<Block> blocks(BlockType type) const;
@@ -155,6 +162,9 @@ class KVCacheState {
   void set_next_transfer_block_idx(size_t idx);
   void advance_transfer_block_idx(size_t idx);
 
+  size_t next_group_transfer_block_idx(BlockType type) const;
+  void advance_group_transfer_block_idx(BlockType type, size_t idx);
+
   void reset();
 
   void process_beam_search(std::optional<Block> new_block = std::nullopt);
@@ -181,6 +191,10 @@ class KVCacheState {
 
   // next logical prompt block index that needs PD PUSH transfer.
   size_t next_transfer_block_idx_ = 0;
+
+  // Cache groups can have different block sizes, so each group advances its
+  // transfer cursor independently.
+  std::map<BlockType, size_t> next_group_transfer_block_idxes_;
 
   // shared blocks number per block type.
   std::map<BlockType, uint32_t> num_owned_shared_blocks_;

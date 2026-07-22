@@ -55,6 +55,24 @@ void KVCacheState::incr_kv_cache_tokens_num(size_t num) {
   slice_window_pos_ += num;
 }
 
+void KVCacheState::incr_kv_cache_tokens_num_up_to(size_t new_target) {
+  const size_t capacity = current_max_tokens_capacity();
+  // Drift check: the counter was already advanced past capacity by an earlier
+  // call. Failing here loudly names the producer instead of silently letting
+  // the drift propagate to batch_input_builder's CHECK.
+  CHECK_LE(kv_cache_tokens_num_, capacity)
+      << "kv_cache_tokens_num_ drifted past capacity: " << kv_cache_tokens_num_
+      << " > " << capacity;
+  CHECK_LE(new_target, capacity)
+      << "incr_kv_cache_tokens_num_up_to target above capacity: " << new_target
+      << " > " << capacity;
+  if (new_target > kv_cache_tokens_num_) {
+    const size_t delta = new_target - kv_cache_tokens_num_;
+    kv_cache_tokens_num_ = new_target;
+    slice_window_pos_ += delta;
+  }
+}
+
 Slice<Block> KVCacheState::blocks(BlockType type) const {
   const auto it = composite_blocks_.find(type);
   return it == composite_blocks_.end() ? Slice<Block>(empty_blocks())
@@ -303,15 +321,29 @@ void KVCacheState::advance_transfer_block_idx(size_t idx) {
   next_transfer_block_idx_ = std::max(next_transfer_block_idx_, idx);
 }
 
+size_t KVCacheState::next_group_transfer_block_idx(BlockType type) const {
+  const auto it = next_group_transfer_block_idxes_.find(type);
+  return it == next_group_transfer_block_idxes_.end() ? 0 : it->second;
+}
+
+void KVCacheState::advance_group_transfer_block_idx(BlockType type,
+                                                    size_t idx) {
+  size_t& cursor = next_group_transfer_block_idxes_[type];
+  cursor = std::max(cursor, idx);
+}
+
 void KVCacheState::reset() {
   kv_cache_tokens_num_ = 0;
   num_owned_shared_blocks_.clear();
   pushed_local_block_count_ = 0;
   composite_blocks_.clear();
+  src_blocks_.clear();
+  need_swap_ = false;
   transfer_kv_info_.reset();
   next_transfer_block_idx_ = 0;
   pending_linear_save_hash_.reset();
   linear_restore_src_block_.reset();
+  next_group_transfer_block_idxes_.clear();
 }
 
 void KVCacheState::process_beam_search(std::optional<Block> new_block) {

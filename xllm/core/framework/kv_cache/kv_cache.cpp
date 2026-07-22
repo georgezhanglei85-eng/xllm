@@ -80,6 +80,33 @@ std::unique_ptr<KVCacheImpl> create_kv_cache_impl(
   return std::make_unique<KVCacheImpl>(kv_cache_shape, create_options);
 }
 
+std::unique_ptr<KVCacheImpl> create_host_kv_cache_impl(
+    const KVCacheShape& kv_cache_shape,
+    const KVCacheCreateOptions& create_options,
+    BlockType type,
+    int64_t layer_count) {
+  if (util::is_deepseek_v4_model_type(create_options.model_type())) {
+    return std::make_unique<DeepSeekV4KVCacheImpl>(
+        kv_cache_shape, create_options, type, layer_count);
+  }
+
+  switch (type) {
+    case BlockType::SINGLE:
+      return std::make_unique<LinearAttentionKVCacheImpl>(
+          kv_cache_shape, create_options, type, layer_count);
+    case BlockType::KV:
+      if (create_options.enable_lighting_indexer()) {
+        return std::make_unique<IndexedKVCacheImpl>(
+            kv_cache_shape, create_options, type, layer_count);
+      }
+      return std::make_unique<KVCacheImpl>(
+          kv_cache_shape, create_options, type, layer_count);
+    default:
+      LOG(FATAL) << "Unsupported non-DSV4 host block type: "
+                 << static_cast<int32_t>(type);
+  }
+}
+
 std::string int32_vector_string(const std::vector<int32_t>& values) {
   std::ostringstream oss;
   oss << "[";
@@ -180,6 +207,15 @@ KVCache::KVCache(const KVCacheShape& kv_cache_shape,
                  int64_t layer_id)
     : impl_(create_kv_cache_impl(kv_cache_shape, create_options, layer_id)) {}
 
+KVCache::KVCache(const KVCacheShape& kv_cache_shape,
+                 const KVCacheCreateOptions& create_options,
+                 BlockType type,
+                 int64_t layer_count)
+    : impl_(create_host_kv_cache_impl(kv_cache_shape,
+                                      create_options,
+                                      type,
+                                      layer_count)) {}
+
 torch::Tensor KVCache::get_k_cache() const { return impl_->get_k_cache(); }
 
 torch::Tensor KVCache::get_v_cache() const { return impl_->get_v_cache(); }
@@ -189,42 +225,7 @@ torch::Tensor KVCache::get_index_cache() const {
 }
 
 std::vector<KVCacheTensor> KVCache::get_cache_tensors() const {
-  std::vector<KVCacheTensor> tensors;
-  tensors.reserve(5);
-
-  const torch::Tensor key_cache = get_k_cache();
-  if (key_cache.defined() && key_cache.numel() > 0) {
-    tensors.emplace_back(KVCacheTensorRole::KEY, key_cache);
-  }
-
-  const torch::Tensor value_cache = get_v_cache();
-  if (value_cache.defined() && value_cache.numel() > 0) {
-    tensors.emplace_back(KVCacheTensorRole::VALUE, value_cache);
-  }
-
-  const torch::Tensor index_cache = get_index_cache();
-  if (index_cache.defined() && index_cache.numel() > 0) {
-    tensors.emplace_back(KVCacheTensorRole::INDEX, index_cache);
-  }
-
-  const std::optional<torch::Tensor> index_cache_scale =
-      get_indexer_cache_scale();
-  if (index_cache_scale.has_value()) {
-    tensors.emplace_back(KVCacheTensorRole::INDEX_SCALE,
-                         index_cache_scale.value());
-  }
-
-  const torch::Tensor conv_cache = get_conv_cache();
-  if (conv_cache.defined() && conv_cache.numel() > 0) {
-    tensors.emplace_back(KVCacheTensorRole::CONV, conv_cache);
-  }
-
-  const torch::Tensor ssm_cache = get_ssm_cache();
-  if (ssm_cache.defined() && ssm_cache.numel() > 0) {
-    tensors.emplace_back(KVCacheTensorRole::SSM, ssm_cache);
-  }
-
-  return tensors;
+  return impl_->get_cache_tensors();
 }
 
 std::optional<torch::Tensor> KVCache::get_k_cache_scale() const {
@@ -246,6 +247,10 @@ torch::Tensor KVCache::get_conv_cache() const {
 torch::Tensor KVCache::get_ssm_cache() const { return impl_->get_ssm_cache(); }
 
 torch::Tensor KVCache::get_swa_cache() const { return impl_->get_swa_cache(); }
+
+BlockTypeTensorMap KVCache::get_block_type_tensors(BlockType type) const {
+  return impl_->get_block_type_tensors(type);
+}
 
 torch::Tensor KVCache::get_compress_kv_state() const {
   return impl_->get_compress_kv_state();

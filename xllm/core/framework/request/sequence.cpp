@@ -398,7 +398,8 @@ void Sequence::update_last_step_token(const Token& token, size_t token_offset) {
     // This happens when the sequence was preempted during schedule_request(),
     // causing its KV cache to be deallocated (reset), but it's still in
     // last_batch_ being processed by update_last_step_result().
-    if (kv_state_.num_blocks(BlockType::KV) == 0) {
+    // Composite KV managers can have capacity without exposing local blocks.
+    if (kv_state_.current_max_tokens_capacity() == 0) {
       return;
     }
     kv_state_.incr_kv_cache_tokens_num(1);
@@ -783,10 +784,17 @@ void Sequence::update_linear_state_hashes(uint32_t chunk_stride) {
   }
   linear_hash_stride_ = chunk_stride;
   // Cover only whole chunks; the trailing partial chunk carries no checkpoint.
-  // Linear-state checkpoints are text-only today: even under a VLM the mounted
-  // ops are dropped before forward (vlm_engine drops unresolved linear ops), so
-  // TEXT keeps this hash domain aligned with what can actually be restored.
-  extend_prefix_hashes(BlockHasherType::TEXT,
+  // Fold multimodal content into the chunk digest whenever this sequence
+  // carries it, so a linear-state checkpoint keyed on a chunk that spans image
+  // tokens cannot collide with a text-only chunk (or a different image) at the
+  // same token boundary. The digest is chosen from mm_data_ rather than an
+  // engine-bound type because the linear hash is only ever computed here, in
+  // the sequence's own context, where mm_data_ is in hand -- and with an empty
+  // mm_data_ the MM hasher is byte-identical to TEXT, so text-only sequences
+  // are unaffected.
+  const BlockHasherType hasher_type =
+      mm_data_.valid() ? BlockHasherType::MM : BlockHasherType::TEXT;
+  extend_prefix_hashes(hasher_type,
                        mm_data_,
                        this->tokens(),
                        chunk_stride,
